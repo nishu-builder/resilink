@@ -1,12 +1,12 @@
-version: '3'
+version: "3"
 
-dotenv: ['.env.example', '.env']
+dotenv: [".env.example", ".env"]
 
 tasks:
   up:
     desc: "Run backend + frontend with live reload via docker compose"
     cmds:
-      - docker compose watch
+      - docker compose up -d
 
   build:
     desc: "Build backend image"
@@ -49,3 +49,28 @@ tasks:
     desc: Open a bash shell in the backend container
     cmds:
       - 'docker compose exec backend bash -c "cd /app && bash"'
+
+  alembic:
+    desc: Run alembic commands inside the container and sync the versions directory back to the host
+    cmds:
+      - docker compose exec backend bash -c "cd /app && uv run alembic {{.CLI_ARGS}}"
+      # Sync the entire versions directory back to the host
+      - docker compose cp backend:/app/alembic/versions ./backend/alembic/
+
+  migrate:upgrade:
+    desc: Upgrade database to the latest migration
+    cmds:
+      - task alembic -- upgrade head
+
+  migrate:create:
+    desc: Create a new migration file based on model changes
+    cmds:
+      - task: alembic
+        vars:
+          CLI_ARGS: revision --autogenerate -m "'{{.CLI_ARGS}}'"
+    silent: true
+
+  migrate:downgrade:
+    desc: Downgrade the last migration
+    cmds:
+      - task alembic -- downgrade -1

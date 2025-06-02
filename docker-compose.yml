@@ -9,7 +9,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U hazarduser -d harzarddb" ]
+      test: ["CMD-SHELL", "pg_isready -U hazarduser -d hazarddb"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -22,25 +22,13 @@ services:
       postgres:
         condition: service_healthy
     restart: on-failure
-    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 ${UVICORN_RELOAD:+--reload} ${UVICORN_RELOAD:+--reload-dir /app}
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 ${UVICORN_RELOAD:+--reload} ${UVICORN_RELOAD:+--reload-dir /app}
     ports:
       - "8000:8000"
     volumes:
       - ./hazard/data:/data
-    develop:
-      watch:
-        - action: sync
-          path: ./backend
-          target: /app
-          ignore:
-            - "**/__pycache__"
-            - "**/*.py[co]"
-            - "**/*.pyd"
-            - ".pytest_cache"
-            - ".coverage"
-            - ".mypy_cache"
-        - action: rebuild
-          path: ./backend/uv.lock
+      - ./backend:/app
+      - backend_venv:/app/.venv
     env_file:
       - .env.example
       - .env
@@ -52,21 +40,8 @@ services:
     command: yarn dev
     depends_on:
       - backend
-    develop:
-      watch:
-        - action: sync
-          path: ./frontend
-          target: /app
-          ignore:
-            - "node_modules"
-            - ".next"
-            - "out"
-            - ".git"
-            - "*.log"
-        - action: rebuild
-          path: package.json
-        - action: rebuild
-          path: yarn.lock
+    volumes:
+      - ./frontend:/app
     env_file:
       - .env.example
       - .env
@@ -83,3 +58,4 @@ services:
 
 volumes:
   postgres_data:
+  backend_venv:
