@@ -140,74 +140,14 @@ The flood-risk-app is a modern web application mockup that provides a user-frien
 - **Flood-risk-app Features**:
   - Intervention cost tracking
   - ROI calculations
-  - Insurance premium reduction estimates
   - Expected Annual Loss (EAL) calculations
   - Budget optimization
-
-#### 3. **Scenario Management**
-
-- **Gap**: Hazard system runs single analyses
-- **Flood-risk-app Features**:
-  - Multiple scenario creation (Baseline, Partial, Full, Custom)
-  - Comparative analysis between scenarios
-  - Delta calculations
-  - Scenario persistence
-
-#### 4. **Optimization Engine**
-
-- **Gap**: No optimization capabilities in hazard system
-- **Flood-risk-app Features**:
-  - Budget-constrained optimization
-  - Automated intervention selection
-  - Multi-objective optimization (cost vs. risk reduction)
-  - AI-powered recommendations
 
 #### 5. **User Experience Features**
 
 - **Gap**: Hazard system is API-only
 - **Flood-risk-app Features**:
   - Guided workflow wizard
-  - Interactive visualizations
-  - Drag-and-drop file uploads
-  - Real-time feedback
-  - Progress tracking
-
-#### 6. **Portfolio Management**
-
-- **Gap**: Hazard system treats buildings as single datasets
-- **Flood-risk-app Features**:
-  - Multiple portfolio support
-  - Portfolio comparison
-  - Pre-built demo portfolios
-  - Portfolio-level analytics
-
-#### 7. **Advanced Visualizations**
-
-- **Gap**: Hazard system outputs raw GeoJSON
-- **Flood-risk-app Features**:
-  - Interactive maps with multiple layers
-  - Risk heatmaps
-  - Intervention impact visualization
-  - Chart-based comparisons
-  - Fragility curve shift animations
-
-#### 8. **Building Classification**
-
-- **Gap**: Hazard system uses buildings as-is
-- **Flood-risk-app Features**:
-  - Risk level classification (High/Medium/Low)
-  - Building type categorization
-  - Bulk operations by classification
-  - Risk-based filtering
-
-#### 9. **Reporting and Export**
-
-- **Gap**: Hazard system only provides raw results
-- **Flood-risk-app Features**:
-  - Formatted report generation
-  - Multiple export formats
-  - Executive summaries
-  - Customizable report templates
 
 ### Integration Opportunities
 
@@ -215,8 +155,6 @@ To converge these systems, the following integration points should be considered
 
 1. **Extend Models**: Add intervention, scenario, and portfolio models to the backend
 2. **Financial Engine**: Implement cost and benefit calculation services
-3. **Optimization Service**: Add optimization algorithms to the backend
-4. **Enhanced API**: Create endpoints for scenarios, interventions, and financial analysis
 5. **Result Enhancement**: Extend analysis results to include financial metrics and intervention impacts
 6. **Frontend Integration**: Connect flood-risk-app UI to the hazard backend APIs
 
