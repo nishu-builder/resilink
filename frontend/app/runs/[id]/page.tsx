@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import dynamic from 'next/dynamic'; // Import dynamic
-import { useMemo, useEffect } from 'react'; // Import useMemo and useEffect
+import { useMemo, useEffect, useState } from 'react'; // Import useMemo, useEffect, and useState
 import { useMap } from 'react-leaflet';
 // Import icon images directly
 import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
@@ -54,6 +54,26 @@ type EALResponse = {
   total_eal: number;
   building_count: number;
   building_eals?: Record<string, number>;
+  buildings_with_values?: number;
+  total_asset_value?: number;
+  building_details?: Array<{
+    building_id: string;
+    asset_value: number;
+    damage_states: {
+      P_DS0: number | null;
+      P_DS1: number | null;
+      P_DS2: number | null;
+      P_DS3: number | null;
+    };
+    expected_damage_cost: number;
+    damage_costs_by_state?: {
+      DS0: number;
+      DS1: number;
+      DS2: number;
+      DS3: number;
+    };
+    error?: string;
+  }>;
 };
 
 // Dynamically import the Map component
@@ -195,6 +215,31 @@ export default function RunDetailPage() {
   console.log("Results Loading:", isLoadingResults);
   console.log("Results Error:", resultsError);
   console.log("Results Data:", resultsData);
+
+  // Add state for analysis view
+  const [activeTab, setActiveTab] = useState('summary');
+
+  // Helper function to get the most likely damage state
+  const getMostLikelyDamageState = (damageStates: any) => {
+    if (damageStates.P_DS0 === null) return { state: 'Error', probability: 0, color: 'text-gray-500' };
+    
+    const states = [
+      { name: 'DS0', label: 'No Damage', prob: damageStates.P_DS0, color: 'text-green-600' },
+      { name: 'DS1', label: 'Slight', prob: damageStates.P_DS1, color: 'text-yellow-600' },
+      { name: 'DS2', label: 'Moderate', prob: damageStates.P_DS2, color: 'text-orange-600' },
+      { name: 'DS3', label: 'Substantial', prob: damageStates.P_DS3, color: 'text-red-600' }
+    ];
+    
+    const mostLikely = states.reduce((max, current) => 
+      current.prob > max.prob ? current : max
+    );
+    
+    return {
+      state: mostLikely.label,
+      probability: mostLikely.prob,
+      color: mostLikely.color
+    };
+  };
 
   if (isLoading) return <p>Loading run details...</p>;
   if (error) return <p>Error loading run details: {error.message}</p>;
@@ -338,49 +383,189 @@ export default function RunDetailPage() {
         </Card>
       )}
 
-      {/* Financial Analysis Section */}
-      {run.status === 'COMPLETED' && ealData && (
+      {/* Analysis Section */}
+      {run.status === 'COMPLETED' && (
         <Card>
           <CardHeader>
-            <CardTitle>Financial Analysis</CardTitle>
-            <CardDescription>Expected Annual Loss (EAL) calculations for this run.</CardDescription>
+            <CardTitle>Analysis</CardTitle>
+            <CardDescription>Expected Annual Loss (EAL) calculations and building-level damage analysis for this run.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="flex items-start space-x-3">
-                <DollarSign className="w-5 h-5 text-red-600 mt-0.5" />
-                <div>
-                  <p className="text-2xl font-bold">${ealData.total_eal.toLocaleString()}</p>
-                  <p className="text-sm text-muted-foreground">Total EAL</p>
+            {isLoadingEAL ? (
+              <p>Loading analysis...</p>
+            ) : ealData ? (
+              <>
+                {/* Tab Navigation */}
+                <div className="flex space-x-4 mb-6 border-b">
+                  <button
+                    onClick={() => setActiveTab('summary')}
+                    className={`pb-2 px-1 text-sm font-medium border-b-2 transition-colors ${
+                      activeTab === 'summary'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Summary
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('buildings')}
+                    className={`pb-2 px-1 text-sm font-medium border-b-2 transition-colors ${
+                      activeTab === 'buildings'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Building Details
+                  </button>
                 </div>
-              </div>
-              
-              <div className="flex items-start space-x-3">
-                <Building className="w-5 h-5 text-blue-600 mt-0.5" />
-                <div>
-                  <p className="text-2xl font-bold">{ealData.building_count}</p>
-                  <p className="text-sm text-muted-foreground">Buildings Analyzed</p>
-                </div>
-              </div>
 
-              <div className="flex items-start space-x-3">
-                <TrendingUp className="w-5 h-5 text-green-600 mt-0.5" />
-                <div>
-                  <p className="text-2xl font-bold">
-                    ${Math.round(ealData.total_eal / ealData.building_count).toLocaleString()}
-                  </p>
-                  <p className="text-sm text-muted-foreground">Average per Building</p>
-                </div>
-              </div>
-            </div>
+                {/* Summary Tab */}
+                {activeTab === 'summary' && (
+                  <div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="flex items-start space-x-3">
+                        <DollarSign className="w-5 h-5 text-red-600 mt-0.5" />
+                        <div>
+                          <p className="text-2xl font-bold">${ealData.total_eal.toLocaleString()}</p>
+                          <p className="text-sm text-muted-foreground">Total EAL</p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-start space-x-3">
+                        <Building className="w-5 h-5 text-blue-600 mt-0.5" />
+                        <div>
+                          <p className="text-2xl font-bold">{ealData.building_count}</p>
+                          <p className="text-sm text-muted-foreground">Buildings Analyzed</p>
+                        </div>
+                      </div>
 
-            {run.run_group_id && (
-              <div className="mt-4 pt-4 border-t">
+                      <div className="flex items-start space-x-3">
+                        <TrendingUp className="w-5 h-5 text-green-600 mt-0.5" />
+                        <div>
+                          <p className="text-2xl font-bold">
+                            ${Math.round(ealData.total_eal / ealData.building_count).toLocaleString()}
+                          </p>
+                          <p className="text-sm text-muted-foreground">Average per Building</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {run.run_group_id && (
+                      <div className="mt-4 pt-4 border-t">
+                        <Link 
+                          href={`/run-groups/${run.run_group_id}`} 
+                          className="text-blue-600 hover:underline text-sm"
+                        >
+                          Compare with other runs in group →
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Building Details Tab */}
+                {activeTab === 'buildings' && (
+                  <div className="space-y-4">
+                    {ealData.building_details && ealData.building_details.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Building ID
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Asset Value
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Most Likely Damage State
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Damage States (Probabilities)
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Expected Damage Cost
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {ealData.building_details.map((building, index) => {
+                              const mostLikely = getMostLikelyDamageState(building.damage_states);
+                              return (
+                                <tr key={building.building_id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    {building.building_id}
+                                    {building.error && (
+                                      <div className="text-xs text-red-600 mt-1">Error: {building.error}</div>
+                                    )}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    ${building.asset_value.toLocaleString()}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                    <div className={`font-medium ${mostLikely.color}`}>
+                                      {mostLikely.state}
+                                    </div>
+                                    {mostLikely.probability > 0 && (
+                                      <div className="text-xs text-gray-400">
+                                        {(mostLikely.probability * 100).toFixed(1)}% probability
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="px-6 py-4 text-sm text-gray-500">
+                                    {building.damage_states.P_DS0 !== null ? (
+                                      <div className="space-y-1">
+                                        <div className="flex justify-between">
+                                          <span className="text-green-600">DS0 (No damage):</span>
+                                          <span>{(building.damage_states.P_DS0 * 100).toFixed(1)}%</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-yellow-600">DS1 (Slight):</span>
+                                          <span>{(building.damage_states.P_DS1! * 100).toFixed(1)}%</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-orange-600">DS2 (Moderate):</span>
+                                          <span>{(building.damage_states.P_DS2! * 100).toFixed(1)}%</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-red-600">DS3 (Substantial):</span>
+                                          <span>{(building.damage_states.P_DS3! * 100).toFixed(1)}%</span>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <span className="text-gray-400">N/A (Error)</span>
+                                    )}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <div className="font-medium">${building.expected_damage_cost.toLocaleString()}</div>
+                                    {building.damage_costs_by_state && (
+                                      <div className="text-xs text-gray-400 mt-1">
+                                        Annual expected loss
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-gray-500">No building details available.</p>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <p className="text-amber-800">
+                  Analysis is not available for this run. This typically means that asset values have not been set for the buildings in this dataset.
+                </p>
                 <Link 
-                  href={`/run-groups/${run.run_group_id}`} 
-                  className="text-blue-600 hover:underline text-sm"
+                  href={`/datasets/buildings/${run.building_dataset_id}`}
+                  className="text-blue-600 hover:underline text-sm mt-2 inline-block"
                 >
-                  Compare with other runs in group →
+                  Go to building dataset to set asset values →
                 </Link>
               </div>
             )}

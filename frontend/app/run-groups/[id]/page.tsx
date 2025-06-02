@@ -44,9 +44,25 @@ type ComparisonResponse = {
     eal_reduction: number;
     eal_reduction_percent: number;
     incremental_cost: number;
-    roi: number;
-    payback_years: number;
+    roi: number | null;
+    payback_years: number | null;
   };
+};
+
+// Helper function to format payback years safely
+const formatPaybackYears = (paybackYears: number | null): string => {
+  if (paybackYears === null || paybackYears === Infinity || !isFinite(paybackYears)) {
+    return "Never";
+  }
+  return `${paybackYears.toFixed(1)} years`;
+};
+
+// Helper function to format ROI safely
+const formatROI = (roi: number | null): string => {
+  if (roi === null || roi === Infinity || !isFinite(roi)) {
+    return "∞";
+  }
+  return `${(roi * 100).toFixed(0)}%`;
 };
 
 export default function RunGroupDetailPage() {
@@ -219,14 +235,14 @@ export default function RunGroupDetailPage() {
                   <TrendingDown className="w-5 h-5 text-green-600 mt-0.5" />
                   <div>
                     <p className="font-semibold">{comparison.comparison.eal_reduction_percent.toFixed(1)}%</p>
-                    <p className="text-sm text-muted-foreground">Risk Reduction</p>
+                    <p className="text-sm text-muted-foreground">% Damage Reduction</p>
                   </div>
                 </div>
 
                 <div className="flex items-start space-x-2">
                   <DollarSign className="w-5 h-5 text-blue-600 mt-0.5" />
                   <div>
-                    <p className="font-semibold">{(comparison.comparison.roi * 100).toFixed(0)}%</p>
+                    <p className="font-semibold">{formatROI(comparison.comparison.roi)}</p>
                     <p className="text-sm text-muted-foreground">ROI</p>
                   </div>
                 </div>
@@ -234,7 +250,7 @@ export default function RunGroupDetailPage() {
                 <div className="flex items-start space-x-2">
                   <Clock className="w-5 h-5 text-purple-600 mt-0.5" />
                   <div>
-                    <p className="font-semibold">{comparison.comparison.payback_years.toFixed(1)} years</p>
+                    <p className="font-semibold">{formatPaybackYears(comparison.comparison.payback_years)}</p>
                     <p className="text-sm text-muted-foreground">Payback Period</p>
                   </div>
                 </div>

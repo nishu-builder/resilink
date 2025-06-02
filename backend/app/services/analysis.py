@@ -19,7 +19,8 @@ from scipy.stats import norm
 import logging
 import pandas as pd
 
-from app.models import Run, FragilityCurve, MappingSet, Hazard, BuildingDataset, RunIntervention
+from app.models import Run, FragilityCurve, MappingSet, Hazard, BuildingDataset, RunIntervention, Building
+from app.services.financial import calculate_eal
 
 # Constants
 FT_TO_M = 0.3048
@@ -142,180 +143,271 @@ async def perform_analysis(run_id: int, M_OFFSET: float = 0.0) -> None:
 
     Results written to /data/results_{run_id}.geojson and Run updated.
     """
+    logger.info(f"Starting perform_analysis for run_id: {run_id}")
+    
     # Get session using the accessor
     session = get_current_session()
 
     results_path = Path("/data") / f"results_{run_id}.geojson"
 
-    # Fetch run using await
-    run = await session.get(Run, run_id)
-    if not run:
-        raise ValueError(f"Run id {run_id} not found")
-
-    # Fetch related objects using await
-    hazard: Hazard | None = await session.get(Hazard, run.hazard_id)
-    mapping_set: MappingSet | None = await session.get(MappingSet, run.mapping_set_id)
-    building_ds: BuildingDataset | None = await session.get(BuildingDataset, run.building_dataset_id)
-    if not all([hazard, mapping_set, building_ds]):
-        raise ValueError("Run has invalid foreign keys")
-
-    # NEW: Fetch interventions for this run
-    interventions_result = await session.execute(
-        select(RunIntervention)
-        .where(RunIntervention.run_id == run_id)
-        .options(joinedload(RunIntervention.intervention))
-    )
-    run_interventions = interventions_result.scalars().all()
-
-    # Build a map of building_id -> elevation adjustment
-    elevation_adjustments = {}
-    for ri in run_interventions:
-        if ri.intervention.type == 'building_elevation':
-            elevation_ft = ri.parameters.get('elevation_ft', 0)
-            elevation_adjustments[str(ri.building_id)] = elevation_ft
-
-    run.status = "RUNNING"
-    session.add(run)
-    await session.commit()
-
     try:
-        # File I/O remains synchronous for now
-        with open(mapping_set.json_path, "r") as f:
-            mapping_json = json.load(f)
-        arch_to_fragility = _create_mapping_dict(mapping_json)
+        # Fetch run using await
+        logger.info(f"Fetching run {run_id}")
+        run = await session.get(Run, run_id)
+        if not run:
+            raise ValueError(f"Run id {run_id} not found")
 
-        # Build fragility cache from DB curves
-        fragility_cache: Dict[str, Dict[str, Any]] = {}
-        # Use await for execute
-        result = await session.execute(select(FragilityCurve))
-        curves = result.scalars().all()
-        for c in curves:
-            obj = json.load(open(c.json_path, "r"))
-            fragility_cache[obj["id"]] = obj
+        # Fetch related objects using await
+        logger.info(f"Fetching related objects for run {run_id}")
+        hazard: Hazard | None = await session.get(Hazard, run.hazard_id)
+        mapping_set: MappingSet | None = await session.get(MappingSet, run.mapping_set_id)
+        building_ds: BuildingDataset | None = await session.get(BuildingDataset, run.building_dataset_id)
+        if not all([hazard, mapping_set, building_ds]):
+            raise ValueError("Run has invalid foreign keys")
 
-        # Ensure all fragility ids referenced in mapping exist
-        missing_ids = [fid for fid in arch_to_fragility.values() if fid not in fragility_cache]
-        if missing_ids:
-            raise ValueError(f"Missing fragility curve(s) in DB: {missing_ids}")
+        # NEW: Fetch interventions for this run
+        logger.info(f"Fetching interventions for run {run_id}")
+        interventions_result = await session.execute(
+            select(RunIntervention)
+            .where(RunIntervention.run_id == run_id)
+            .options(joinedload(RunIntervention.intervention))
+        )
+        run_interventions = interventions_result.scalars().all()
+        logger.info(f"Found {len(run_interventions)} interventions for run {run_id}")
 
-        # Load WSE raster (sync)
-        wse_ds = rasterio.open(hazard.wse_raster_path)
+        # NEW: Fetch all buildings with asset values for this dataset
+        logger.info(f"Fetching buildings for dataset {building_ds.id}")
+        buildings_result = await session.execute(
+            select(Building).where(Building.dataset_id == building_ds.id)
+        )
+        buildings = buildings_result.scalars().all()
+        logger.info(f"Found {len(buildings)} buildings in dataset {building_ds.id}")
+        
+        # Create a map of building GUID to asset value
+        building_assets = {}
+        for building in buildings:
+            if building.asset_value is not None:
+                building_assets[building.guid] = building.asset_value
+        logger.info(f"Found {len(building_assets)} buildings with asset values")
 
-        # Extract buildings from zip (sync)
-        with TemporaryDirectory() as tmpdir:
-            with zipfile.ZipFile(building_ds.shp_path, 'r') as zip_ref:
-                zip_ref.extractall(tmpdir)
+        # Build a map of building_id -> elevation adjustment
+        elevation_adjustments = {}
+        for ri in run_interventions:
+            if ri.intervention.type == 'building_elevation':
+                elevation_ft = ri.parameters.get('elevation_ft', 0)
+                elevation_adjustments[str(ri.building_id)] = elevation_ft
 
-            # Find .shp file recursively (sync)
-            shp_files = list(Path(tmpdir).rglob("*.shp")) # Use rglob
-            if not shp_files:
-                raise FileNotFoundError("No .shp file found anywhere in uploaded building dataset zip")
-            # Optional: Add check if multiple .shp files are found, decide which to use
-            if len(shp_files) > 1:
-                # Example: raise error or log a warning and pick the first one
-                # logger.warning(f"Multiple .shp files found, using {shp_files[0]}")
-                pass # For now, just proceed with the first one found
-            buildings_gdf = gpd.read_file(shp_files[0])
-
-        # Iterate buildings and compute probabilities (calculations are sync)
-        features = []
-        for _, b in buildings_gdf.iterrows():
-            try:
-                guid = b.get('guid') or b.get('id') or _
-                arch_val = int(b['arch_flood']) if 'arch_flood' in b and not pd.isna(b['arch_flood']) else None
-                ffe_ft = float(b['ffe_elev']) if 'ffe_elev' in b and not pd.isna(b['ffe_elev']) else None
-                geom = b.geometry
-
-                if arch_val is None or ffe_ft is None or geom is None or geom.is_empty:
-                    raise ValueError("Missing required attributes or geometry")
-
-                # NEW: Apply elevation intervention if exists
-                elevation_adjustment = elevation_adjustments.get(str(guid), 0)
-                original_ffe_ft = ffe_ft
-                ffe_ft += elevation_adjustment  # Add intervention elevation
-
-                # Sample raster (sync rasterio)
-                x, y = geom.x, geom.y
-                row, col = wse_ds.index(x, y)
-                if not (0 <= row < wse_ds.height and 0 <= col < wse_ds.width):
-                    raise ValueError("Point outside raster bounds")
-                wse_arr = wse_ds.read(1, window=rasterio.windows.Window(col, row, 1, 1))
-                if wse_arr.size == 0:
-                    raise ValueError("Empty raster window")
-                wse_val = wse_arr[0, 0]
-                if not np.isfinite(wse_val):
-                    raise ValueError("Raster value is nodata or non-finite")
-
-                # Calculate ffe_m without the offset
-                ffe_m = ffe_ft * FT_TO_M - M_OFFSET
-
-                fragility_id = arch_to_fragility.get(arch_val)
-                if fragility_id is None:
-                    raise ValueError(f"No fragility mapping for arch_flood {arch_val}")
-                curve_json = fragility_cache[fragility_id]
-
-                ls = calculate_fragility(curve_json, wse_val, ffe_m)
-                logger.info(f"ls: {ls}")
-                p_ls0 = ls.get('LS_0', 0.0)
-                p_ls1 = ls.get('LS_1', 0.0)
-                p_ls2 = ls.get('LS_2', 0.0)
-
-                p_ds3 = max(0.0, p_ls2)
-                p_ds2 = max(0.0, p_ls1 - p_ls2)
-                p_ds1 = max(0.0, p_ls0 - p_ls1)
-                p_ds0 = max(0.0, 1.0 - p_ls0)
-
-                total = p_ds0 + p_ds1 + p_ds2 + p_ds3
-                if not math.isclose(total, 1.0, rel_tol=1e-6):
-                    raise ValueError(f"Probabilities do not sum to 1: {total}")
-
-                features.append({
-                    "type": "Feature",
-                    "geometry": mapping(geom),
-                    "properties": {
-                        "guid": str(guid),  # NEW: Include GUID for tracking
-                        "arch_flood": arch_val,
-                        "ffe_m": ffe_m,
-                        # "ffe_ft": ffe_ft,
-                        # "wse_m": float(wse_val), # Ensure serializable
-                        "eff_depth_m": float(wse_val - ffe_m),
-                        # "fragility_id": fragility_id,
-                        "P_DS0": p_ds0,
-                        "P_DS1": p_ds1,
-                        "P_DS2": p_ds2,
-                        "P_DS3": p_ds3,
-                        "elevation_adjustment": elevation_adjustment,  # NEW
-                        "original_ffe_m": (original_ffe_ft * FT_TO_M) if original_ffe_ft is not None else None,  # NEW
-                    }
-                })
-            except Exception as point_error:
-                guid = b.get('guid') or b.get('id') or _
-                features.append({
-                    "type": "Feature",
-                    "geometry": mapping(geom) if geom and not geom.is_empty else None,
-                    "properties": {
-                        "guid": str(guid),
-                        "error": str(point_error)
-                    }
-                })
-
-        # Create GeoJSON FeatureCollection (sync)
-        results_fc = {
-            "type": "FeatureCollection",
-            "features": features
-        }
-
-        # Write results (sync)
-        with open(results_path, "w") as f:
-            json.dump(results_fc, f)
-        logger.info(f"Results written to {results_path}")
-
-        # Update Run status in DB
-        run.status = "COMPLETED"
-        run.result_path = str(results_path)
-        run.finished_at = datetime.utcnow()
+        logger.info(f"Updating run {run_id} status to RUNNING")
+        run.status = "RUNNING"
         session.add(run)
-    finally:
-        # Ensure raster dataset is closed (important!)
-        if 'wse_ds' in locals() and wse_ds:
-            wse_ds.close()
+        await session.commit()
+
+        try:
+            # File I/O remains synchronous for now
+            logger.info(f"Loading mapping set from {mapping_set.json_path}")
+            with open(mapping_set.json_path, "r") as f:
+                mapping_json = json.load(f)
+            arch_to_fragility = _create_mapping_dict(mapping_json)
+            logger.info(f"Created mapping dictionary with {len(arch_to_fragility)} entries")
+
+            # Build fragility cache from DB curves
+            logger.info("Building fragility cache")
+            fragility_cache: Dict[str, Dict[str, Any]] = {}
+            # Use await for execute
+            result = await session.execute(select(FragilityCurve))
+            curves = result.scalars().all()
+            logger.info(f"Found {len(curves)} fragility curves")
+            for c in curves:
+                obj = json.load(open(c.json_path, "r"))
+                fragility_cache[obj["id"]] = obj
+            logger.info(f"Built fragility cache with {len(fragility_cache)} entries")
+
+            # Ensure all fragility ids referenced in mapping exist
+            missing_ids = [fid for fid in arch_to_fragility.values() if fid not in fragility_cache]
+            if missing_ids:
+                raise ValueError(f"Missing fragility curve(s) in DB: {missing_ids}")
+
+            # Load WSE raster (sync)
+            logger.info(f"Loading WSE raster from {hazard.wse_raster_path}")
+            wse_ds = rasterio.open(hazard.wse_raster_path)
+            logger.info(f"WSE raster loaded: {wse_ds.width}x{wse_ds.height}")
+
+            # Extract buildings from zip (sync)
+            logger.info(f"Extracting buildings from {building_ds.shp_path}")
+            with TemporaryDirectory() as tmpdir:
+                with zipfile.ZipFile(building_ds.shp_path, 'r') as zip_ref:
+                    zip_ref.extractall(tmpdir)
+
+                # Find .shp file recursively (sync)
+                shp_files = list(Path(tmpdir).rglob("*.shp")) # Use rglob
+                if not shp_files:
+                    raise FileNotFoundError("No .shp file found anywhere in uploaded building dataset zip")
+                # Optional: Add check if multiple .shp files are found, decide which to use
+                if len(shp_files) > 1:
+                    logger.warning(f"Multiple .shp files found, using {shp_files[0]}")
+                    
+                logger.info(f"Reading buildings from {shp_files[0]}")
+                buildings_gdf = gpd.read_file(shp_files[0])
+                logger.info(f"Loaded {len(buildings_gdf)} buildings from shapefile")
+
+            # Iterate buildings and compute probabilities (calculations are sync)
+            logger.info("Starting building analysis")
+            features = []
+            for i, (_, b) in enumerate(buildings_gdf.iterrows()):
+                if i % 10 == 0:  # Log progress every 10 buildings
+                    logger.info(f"Processing building {i+1}/{len(buildings_gdf)}")
+                    
+                try:
+                    guid = b.get('guid') or b.get('id') or _
+                    arch_val = int(b['arch_flood']) if 'arch_flood' in b and not pd.isna(b['arch_flood']) else None
+                    ffe_ft = float(b['ffe_elev']) if 'ffe_elev' in b and not pd.isna(b['ffe_elev']) else None
+                    geom = b.geometry
+
+                    if arch_val is None or ffe_ft is None or geom is None or geom.is_empty:
+                        raise ValueError("Missing required attributes or geometry")
+
+                    # NEW: Apply elevation intervention if exists
+                    elevation_adjustment = elevation_adjustments.get(str(guid), 0)
+                    original_ffe_ft = ffe_ft
+                    ffe_ft += elevation_adjustment  # Add intervention elevation
+
+                    # Sample raster (sync rasterio)
+                    x, y = geom.x, geom.y
+                    row, col = wse_ds.index(x, y)
+                    # Clamp to edges if within 1 pixel
+                    row = max(0, min(row, wse_ds.height - 1))
+                    col = max(0, min(col, wse_ds.width - 1))
+                    wse_arr = wse_ds.read(1, window=rasterio.windows.Window(col, row, 1, 1))
+                    if wse_arr.size == 0:
+                        raise ValueError("Empty raster window")
+                    wse_val = wse_arr[0, 0]
+                    if not np.isfinite(wse_val):
+                        raise ValueError("Raster value is nodata or non-finite")
+
+                    # Calculate ffe_m without the offset
+                    ffe_m = ffe_ft * FT_TO_M - M_OFFSET
+
+                    fragility_id = arch_to_fragility.get(arch_val)
+                    if fragility_id is None:
+                        raise ValueError(f"No fragility mapping for arch_flood {arch_val}")
+                    curve_json = fragility_cache[fragility_id]
+
+                    ls = calculate_fragility(curve_json, wse_val, ffe_m)
+                    p_ls0 = ls.get('LS_0', 0.0)
+                    p_ls1 = ls.get('LS_1', 0.0)
+                    p_ls2 = ls.get('LS_2', 0.0)
+
+                    p_ds3 = max(0.0, p_ls2)
+                    p_ds2 = max(0.0, p_ls1 - p_ls2)
+                    p_ds1 = max(0.0, p_ls0 - p_ls1)
+                    p_ds0 = max(0.0, 1.0 - p_ls0)
+
+                    total = p_ds0 + p_ds1 + p_ds2 + p_ds3
+                    if not math.isclose(total, 1.0, rel_tol=1e-3):
+                        raise ValueError(f"Probabilities do not sum to 1: {total}")
+
+                    features.append({
+                        "type": "Feature",
+                        "geometry": mapping(geom),
+                        "properties": {
+                            "guid": str(guid),  # NEW: Include GUID for tracking
+                            "arch_flood": arch_val,
+                            "ffe_m": ffe_m,
+                            # "ffe_ft": ffe_ft,
+                            # "wse_m": float(wse_val), # Ensure serializable
+                            "eff_depth_m": float(wse_val - ffe_m),
+                            # "fragility_id": fragility_id,
+                            "P_DS0": p_ds0,
+                            "P_DS1": p_ds1,
+                            "P_DS2": p_ds2,
+                            "P_DS3": p_ds3,
+                            "elevation_adjustment": elevation_adjustment,  # NEW
+                            "original_ffe_m": (original_ffe_ft * FT_TO_M) if original_ffe_ft is not None else None,  # NEW
+                            "asset_value": building_assets.get(str(guid)),  # NEW: Add asset value
+                        }
+                    })
+                except Exception as point_error:
+                    logger.warning(f"Error processing building {i}: {point_error}")
+                    guid = b.get('guid') or b.get('id') or _
+                    features.append({
+                        "type": "Feature",
+                        "geometry": mapping(geom) if geom and not geom.is_empty else None,
+                        "properties": {
+                            "guid": str(guid),
+                            "error": str(point_error),
+                            "asset_value": building_assets.get(str(guid)),  # NEW: Add asset value even for error cases
+                        }
+                    })
+
+            logger.info(f"Completed building analysis. Generated {len(features)} features")
+
+            # Create GeoJSON FeatureCollection (sync)
+            results_fc = {
+                "type": "FeatureCollection",
+                "features": features
+            }
+
+            # Write results (sync)
+            logger.info(f"Writing results to {results_path}")
+            with open(results_path, "w") as f:
+                json.dump(results_fc, f)
+            logger.info(f"Results written to {results_path}")
+
+            # Calculate EAL if we have building asset values
+            total_eal = None
+            buildings_analyzed = 0
+            buildings_with_values = 0
+            total_asset_value = 0.0
+            
+            if building_assets:
+                try:
+                    logger.info(f"Calculating EAL for run {run_id} with {len(building_assets)} buildings with asset values")
+                    
+                    # Use await here since calculate_eal is async
+                    eal_results = await calculate_eal(run_id, building_assets)
+                    
+                    total_eal = eal_results.get('total_eal', 0)
+                    buildings_analyzed = eal_results.get('building_count', 0)
+                    buildings_with_values = len(building_assets)
+                    total_asset_value = sum(building_assets.values())
+                    
+                    logger.info(f"EAL calculation complete: Total EAL = ${total_eal:,.2f}")
+                except Exception as e:
+                    logger.error(f"Failed to calculate EAL for run {run_id}: {e}")
+                    # Don't fail the whole run if EAL calculation fails
+
+            # Update Run status in DB
+            logger.info(f"Updating run {run_id} status to COMPLETED")
+            run.status = "COMPLETED"
+            run.result_path = str(results_path)
+            run.finished_at = datetime.utcnow()
+            run.total_eal = total_eal
+            run.buildings_analyzed = buildings_analyzed
+            run.buildings_with_values = buildings_with_values
+            run.total_asset_value = total_asset_value
+            session.add(run)
+            
+            # Explicitly commit the final changes
+            await session.commit()
+            logger.info(f"Successfully completed analysis for run {run_id}")
+            
+        finally:
+            # Ensure raster dataset is closed (important!)
+            if 'wse_ds' in locals() and wse_ds:
+                wse_ds.close()
+                logger.info("WSE raster dataset closed")
+
+    except Exception as e:
+        logger.error(f"Error in perform_analysis for run {run_id}: {e}", exc_info=True)
+        # Update run status to failed if we can
+        try:
+            run = await session.get(Run, run_id)
+            if run:
+                run.status = "FAILED"
+                run.finished_at = datetime.utcnow()
+                session.add(run)
+                await session.commit()
+                logger.info(f"Updated run {run_id} status to FAILED")
+        except Exception as commit_error:
+            logger.error(f"Failed to update run status to FAILED: {commit_error}")
+        raise

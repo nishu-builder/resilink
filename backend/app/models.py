@@ -103,6 +103,12 @@ class Run(Base, table=True):
     status: str = Field(default="PENDING")  # Could be Enum later
     result_path: Optional[str] = None
     finished_at: Optional[datetime] = None
+    
+    # Financial analysis results
+    total_eal: Optional[float] = None
+    buildings_analyzed: Optional[int] = None
+    buildings_with_values: Optional[int] = None
+    total_asset_value: Optional[float] = None
 
     hazard: Optional[Hazard] = Relationship(back_populates="runs")
     building_dataset: Optional[BuildingDataset] = Relationship(back_populates="runs")

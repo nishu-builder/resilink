@@ -16,6 +16,15 @@ type BuildingDataset = { id: number; name: string };
 type RunGroup = { id: number; name: string };
 type Intervention = { id: number; name: string; type: string };
 
+type Building = {
+  id: number;
+  guid: string;
+  dataset_id: number;
+  properties: Record<string, any>;
+  asset_value: number | null;
+  created_at: string;
+};
+
 type InterventionInput = {
   building_id: string;
   intervention_id: number;
@@ -39,6 +48,12 @@ export default function NewRunPage() {
   const { data: buildingDatasets, isLoading: isLoadingBuildings } = useSWR<BuildingDataset[]>('datasets/buildings', (url: string) => api.get(url).then((r) => r.data));
   const { data: runGroups, isLoading: isLoadingGroups } = useSWR<RunGroup[]>('runs/groups', (url: string) => api.get(url).then((r) => r.data));
   const { data: interventionTypes, isLoading: isLoadingInterventions } = useSWR<Intervention[]>('interventions', (url: string) => api.get(url).then((r) => r.data));
+  
+  // Fetch buildings for the selected building dataset
+  const { data: buildings } = useSWR<Building[]>(
+    buildingDatasetId ? `datasets/buildings/${buildingDatasetId}/buildings` : null,
+    (url: string) => api.get(url).then((r) => r.data)
+  );
 
   const addIntervention = () => {
     setInterventions([...interventions, {
@@ -61,6 +76,15 @@ export default function NewRunPage() {
       updated[index] = { ...updated[index], [field]: value };
     }
     setInterventions(updated);
+  };
+
+  // Format building display string for dropdown
+  const formatBuildingOption = (building: Building) => {
+    const propertyKeys = Object.keys(building.properties).slice(0, 2); // Show first 2 properties
+    const propertyDisplay = propertyKeys.map(key => `${key}: ${building.properties[key]}`).join(', ');
+    const assetValue = building.asset_value ? `$${building.asset_value.toLocaleString()}` : 'No value';
+    
+    return `${building.guid} | ${propertyDisplay} | ${assetValue}`;
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -227,12 +251,64 @@ export default function NewRunPage() {
                     <div className="grid grid-cols-4 gap-3">
                       <div>
                         <Label>Building ID</Label>
-                        <Input
-                          value={intervention.building_id}
-                          onChange={(e) => updateIntervention(index, 'building_id', e.target.value)}
-                          placeholder="e.g., B001"
-                          required
-                        />
+                        {buildingDatasetId && buildings ? (
+                          <Select
+                            value={intervention.building_id}
+                            onValueChange={(value) => updateIntervention(index, 'building_id', value)}
+                          >
+                            <SelectTrigger className="h-auto min-h-[60px] py-2">
+                              <SelectValue placeholder="Select a building">
+                                {intervention.building_id && buildings ? (
+                                  <div className="flex flex-col items-start text-left">
+                                    <span className="font-medium">{intervention.building_id}</span>
+                                    {(() => {
+                                      const building = buildings.find(b => b.guid === intervention.building_id);
+                                      if (building) {
+                                        return (
+                                          <>
+                                            <span className="text-xs text-muted-foreground">
+                                              {Object.keys(building.properties).slice(0, 2).map(key => 
+                                                `${key}: ${building.properties[key]}`
+                                              ).join(', ')}
+                                            </span>
+                                            <span className="text-xs font-medium text-green-600">
+                                              {building.asset_value ? `$${building.asset_value.toLocaleString()}` : 'No asset value'}
+                                            </span>
+                                          </>
+                                        );
+                                      }
+                                      return null;
+                                    })()}
+                                  </div>
+                                ) : null}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent className="max-h-[400px]">
+                              {buildings.map((building) => (
+                                <SelectItem key={building.guid} value={building.guid}>
+                                  <div className="flex flex-col items-start">
+                                    <span className="font-medium">{building.guid}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {Object.keys(building.properties).slice(0, 2).map(key => 
+                                        `${key}: ${building.properties[key]}`
+                                      ).join(', ')}
+                                    </span>
+                                    <span className="text-xs font-medium text-green-600">
+                                      {building.asset_value ? `$${building.asset_value.toLocaleString()}` : 'No asset value'}
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            value={intervention.building_id}
+                            onChange={(e) => updateIntervention(index, 'building_id', e.target.value)}
+                            placeholder="Select building dataset first"
+                            disabled
+                          />
+                        )}
                       </div>
                       
                       <div>

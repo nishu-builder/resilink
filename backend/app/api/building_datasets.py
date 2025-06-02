@@ -8,6 +8,7 @@ from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import geopandas as gpd
 from shapely.geometry import mapping
+from pydantic import BaseModel
 
 from app.db import get_async_session
 from app.models import BuildingDataset, Building
@@ -15,6 +16,10 @@ from app.models import BuildingDataset, Building
 from app.api.utils import handle_data_upload, validate_building_file
 
 router = APIRouter(prefix="/datasets/buildings", tags=["Building Datasets"], redirect_slashes=False)
+
+
+class AssetValueUpdate(BaseModel):
+    asset_value: float
 
 
 async def extract_buildings_from_shapefile(dataset: BuildingDataset, db: AsyncSession):
@@ -102,6 +107,24 @@ async def list_datasets(*, db: AsyncSession = Depends(get_async_session)):
     return datasets
 
 
+@router.get("/{dataset_id}", response_model=BuildingDataset)
+async def get_dataset(
+    dataset_id: int,
+    *,
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Get a single building dataset by ID."""
+    result = await db.execute(
+        select(BuildingDataset).where(BuildingDataset.id == dataset_id)
+    )
+    dataset = result.scalar_one_or_none()
+    
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Building dataset not found")
+    
+    return dataset
+
+
 @router.get("/{dataset_id}/buildings", response_model=List[Building])
 async def list_buildings(
     dataset_id: int,
@@ -116,11 +139,11 @@ async def list_buildings(
     return buildings
 
 
-@router.patch("/{dataset_id}/buildings/{building_guid}")
+@router.post("/{dataset_id}/buildings/{building_guid}")
 async def update_building_asset_value(
     dataset_id: int,
     building_guid: str,
-    asset_value: float,
+    update_data: AssetValueUpdate,
     *,
     db: AsyncSession = Depends(get_async_session)
 ):
@@ -135,7 +158,7 @@ async def update_building_asset_value(
     if not building:
         raise HTTPException(status_code=404, detail="Building not found")
     
-    building.asset_value = asset_value
+    building.asset_value = update_data.asset_value
     db.add(building)
     await db.commit()
     await db.refresh(building)

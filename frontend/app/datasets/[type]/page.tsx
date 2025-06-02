@@ -117,7 +117,11 @@ export default function DatasetPage() {
           </thead>
           <tbody>
             {data?.map((d) => (
-              <tr key={d.id} className="border-t hover:bg-muted/50">
+              <tr 
+                key={d.id} 
+                className={`border-t hover:bg-muted/50 ${type === 'buildings' ? 'cursor-pointer' : ''}`}
+                onClick={() => type === 'buildings' && router.push(`/datasets/buildings/${d.id}`)}
+              >
                 <td className="py-2">{d.id}</td>
                 <td>{d.name}</td>
                 <td>{new Date(d.created_at).toLocaleString()}</td>
