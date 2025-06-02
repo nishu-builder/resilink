@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgis/postgis:15-3.4-alpine
+    env_file:
+      - .env.example
+      - .env
+    environment:
+      - TZ=UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U hazarduser -d harzarddb" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 ${UVICORN_RELOAD:+--reload} ${UVICORN_RELOAD:+--reload-dir /app}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./hazard/data:/data
+    develop:
+      watch:
+        - action: sync
+          path: ./backend
+          target: /app
+          ignore:
+            - "**/__pycache__"
+            - "**/*.py[co]"
+            - "**/*.pyd"
+            - ".pytest_cache"
+            - ".coverage"
+            - ".mypy_cache"
+        - action: rebuild
+          path: ./backend/uv.lock
+    env_file:
+      - .env.example
+      - .env
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    command: yarn dev
+    depends_on:
+      - backend
+    develop:
+      watch:
+        - action: sync
+          path: ./frontend
+          target: /app
+          ignore:
+            - "node_modules"
+            - ".next"
+            - "out"
+            - ".git"
+            - "*.log"
+        - action: rebuild
+          path: package.json
+        - action: rebuild
+          path: yarn.lock
+    env_file:
+      - .env.example
+      - .env
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  postgres_data:

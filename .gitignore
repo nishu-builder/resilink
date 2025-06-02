@@ -1,0 +1,6 @@
+*node_modules*
+*venv*
+data/
+*results*
+*env*
+*__pycache__*
