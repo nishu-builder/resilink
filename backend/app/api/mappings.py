@@ -14,7 +14,7 @@ router = APIRouter(prefix="/datasets/mappings", tags=["Mapping Sets"])
 DATA_DIR = Path("/data")
 
 
-@router.post("/", response_model=MappingSet)
+@router.post("", response_model=MappingSet)
 async def create_mapping_set(
     name: str = Form(...),
     mapping_json: UploadFile = File(...),
@@ -31,7 +31,7 @@ async def create_mapping_set(
     )
 
 
-@router.get("/", response_model=List[MappingSet])
+@router.get("", response_model=List[MappingSet])
 async def list_mappings(*, db: AsyncSession = Depends(get_async_session)):
     result = await db.execute(select(MappingSet))
     mappings = result.scalars().all()

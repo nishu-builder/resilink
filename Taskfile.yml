@@ -50,6 +50,11 @@ tasks:
     cmds:
       - 'docker compose exec backend bash -c "cd /app && bash"'
 
+  seed:
+    desc: Seed the database with initial data from /app/seed_data
+    cmds:
+      - docker compose exec backend python scripts/seed_database.py
+
   alembic:
     desc: Run alembic commands inside the container and sync the versions directory back to the host
     cmds:

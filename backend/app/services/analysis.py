@@ -14,11 +14,12 @@ import rasterio
 from shapely.geometry import mapping
 from app.db import get_current_session, with_async_session
 from sqlmodel import select
+from sqlalchemy.orm import joinedload
 from scipy.stats import norm
 import logging
 import pandas as pd
 
-from app.models import Run, FragilityCurve, MappingSet, Hazard, BuildingDataset
+from app.models import Run, FragilityCurve, MappingSet, Hazard, BuildingDataset, RunIntervention
 
 # Constants
 FT_TO_M = 0.3048
@@ -137,7 +138,7 @@ def calculate_fragility(fragility_curve_data: dict, wse_m: float, ffe_elev_m: fl
 
 @with_async_session
 async def perform_analysis(run_id: int, M_OFFSET: float = 0.0) -> None:
-    """Execute full damage-analysis workflow for a Run row.
+    """Execute full damage-analysis workflow for a Run row with intervention support.
 
     Results written to /data/results_{run_id}.geojson and Run updated.
     """
@@ -157,6 +158,21 @@ async def perform_analysis(run_id: int, M_OFFSET: float = 0.0) -> None:
     building_ds: BuildingDataset | None = await session.get(BuildingDataset, run.building_dataset_id)
     if not all([hazard, mapping_set, building_ds]):
         raise ValueError("Run has invalid foreign keys")
+
+    # NEW: Fetch interventions for this run
+    interventions_result = await session.execute(
+        select(RunIntervention)
+        .where(RunIntervention.run_id == run_id)
+        .options(joinedload(RunIntervention.intervention))
+    )
+    run_interventions = interventions_result.scalars().all()
+
+    # Build a map of building_id -> elevation adjustment
+    elevation_adjustments = {}
+    for ri in run_interventions:
+        if ri.intervention.type == 'building_elevation':
+            elevation_ft = ri.parameters.get('elevation_ft', 0)
+            elevation_adjustments[str(ri.building_id)] = elevation_ft
 
     run.status = "RUNNING"
     session.add(run)
@@ -213,6 +229,11 @@ async def perform_analysis(run_id: int, M_OFFSET: float = 0.0) -> None:
                 if arch_val is None or ffe_ft is None or geom is None or geom.is_empty:
                     raise ValueError("Missing required attributes or geometry")
 
+                # NEW: Apply elevation intervention if exists
+                elevation_adjustment = elevation_adjustments.get(str(guid), 0)
+                original_ffe_ft = ffe_ft
+                ffe_ft += elevation_adjustment  # Add intervention elevation
+
                 # Sample raster (sync rasterio)
                 x, y = geom.x, geom.y
                 row, col = wse_ds.index(x, y)
@@ -252,7 +273,7 @@ async def perform_analysis(run_id: int, M_OFFSET: float = 0.0) -> None:
                     "type": "Feature",
                     "geometry": mapping(geom),
                     "properties": {
-                        # "guid": guid,
+                        "guid": str(guid),  # NEW: Include GUID for tracking
                         "arch_flood": arch_val,
                         "ffe_m": ffe_m,
                         # "ffe_ft": ffe_ft,
@@ -263,6 +284,8 @@ async def perform_analysis(run_id: int, M_OFFSET: float = 0.0) -> None:
                         "P_DS1": p_ds1,
                         "P_DS2": p_ds2,
                         "P_DS3": p_ds3,
+                        "elevation_adjustment": elevation_adjustment,  # NEW
+                        "original_ffe_m": (original_ffe_ft * FT_TO_M) if original_ffe_ft is not None else None,  # NEW
                     }
                 })
             except Exception as point_error:
@@ -271,7 +294,7 @@ async def perform_analysis(run_id: int, M_OFFSET: float = 0.0) -> None:
                     "type": "Feature",
                     "geometry": mapping(geom) if geom and not geom.is_empty else None,
                     "properties": {
-                        "guid": guid,
+                        "guid": str(guid),
                         "error": str(point_error)
                     }
                 })

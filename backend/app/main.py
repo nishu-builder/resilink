@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import SQLModel
 
 from .settings import get_settings
 
@@ -8,7 +7,7 @@ settings = get_settings()
 
 from app.db import get_engine
 
-from app.api import hazards, fragilities, mappings, building_datasets, runs
+from app.api import hazards, fragilities, mappings, building_datasets, runs, financial, interventions
 
 app = FastAPI(title=settings.app_name, debug=settings.LOG_LEVEL == 'DEBUG')
 
@@ -24,16 +23,12 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup() -> None:  # pragma: no cover
-    SQLModel.metadata.create_all(get_engine())
+    pass  # Seeding is now done manually via task command
 
 
 @app.get("/ping")
 async def ping() -> dict[str, str]:
     return {"status": "ok"}
 
-for r in (hazards, fragilities, mappings, building_datasets, runs):
-    app.include_router(r.router)
-    app.include_router(r.router)
-    app.include_router(r.router)
-    app.include_router(r.router)
+for r in (hazards, fragilities, mappings, building_datasets, runs, financial, interventions):
     app.include_router(r.router)

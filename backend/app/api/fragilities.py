@@ -12,7 +12,7 @@ from .utils import handle_data_upload, validate_fragility_file
 
 router = APIRouter(prefix="/datasets/fragilities", tags=["Fragility Curves"], redirect_slashes=False)
 
-@router.post("/", response_model=FragilityCurve)
+@router.post("", response_model=FragilityCurve)
 async def create_fragility_curve(
     name: str = Form(...),
     fragility_json: UploadFile = File(...),
@@ -50,7 +50,7 @@ async def create_fragility_curves_batch(
     
     return created_curves
 
-@router.get("/", response_model=List[FragilityCurve])
+@router.get("", response_model=List[FragilityCurve])
 async def list_curves(*, db: AsyncSession = Depends(get_async_session)):
     result = await db.execute(select(FragilityCurve))
     curves = result.scalars().all()

@@ -7,10 +7,10 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 
 const typeToEndpoint: Record<string, string> = {
-  hazards: 'datasets/hazards/',
-  fragilities: 'datasets/fragilities/',
-  mappings: 'datasets/mappings/',
-  buildings: 'datasets/buildings/',
+  hazards: 'datasets/hazards',
+  fragilities: 'datasets/fragilities',
+  mappings: 'datasets/mappings',
+  buildings: 'datasets/buildings',
 };
 
 type Dataset = {
@@ -128,4 +128,4 @@ export default function DatasetPage() {
       )}
     </div>
   );
-} 
+}

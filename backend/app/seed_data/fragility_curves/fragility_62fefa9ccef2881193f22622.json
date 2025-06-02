@@ -1,0 +1,94 @@
+{
+  "id": "62fefa9ccef2881193f22622",
+  "description": "Galveston hurricane flood fragility specific for building archetype 9",
+  "authors": [
+    "Omar Nofal",
+    "John W. van de Lindt"
+  ],
+  "paperReference": null,
+  "resultUnit": null,
+  "resultType": "Limit State",
+  "hazardType": "hurricane",
+  "inventoryType": "building",
+  "creator": "cwang138",
+  "owner": "incore",
+  "curveParameters": [
+    {
+      "name": "surgeLevel",
+      "unit": "m",
+      "description": "water surface elevation from flood hazard",
+      "fullName": null,
+      "expression": null
+    },
+    {
+      "name": "ffe_elev",
+      "unit": "m",
+      "description": "first floor elevation from inventory",
+      "fullName": null,
+      "expression": "0.0"
+    }
+  ],
+  "spaces": [
+    "cwang138",
+    "incore"
+  ],
+  "demandTypes": [
+    "surgeLevel"
+  ],
+  "demandUnits": [
+    "m"
+  ],
+  "fragilityCurves": [
+    {
+      "description": "legacy - StandardFragilityCurve",
+      "rules": [
+        {
+          "condition": [
+            "surgeLevel - ffe_elev > 0"
+          ],
+          "expression": "scipy.stats.norm.cdf((math.log(surgeLevel - ffe_elev) - (-0.727544461259305))/(0.750941576))"
+        }
+      ],
+      "returnType": {
+        "type": "Limit State",
+        "unit": "",
+        "description": "LS_0"
+      },
+      "curveParameters": null
+    },
+    {
+      "description": "legacy - StandardFragilityCurve",
+      "rules": [
+        {
+          "condition": [
+            "surgeLevel - ffe_elev > 0"
+          ],
+          "expression": "scipy.stats.norm.cdf((math.log(surgeLevel - ffe_elev) - 0.864392923)/(0.929481914))"
+        }
+      ],
+      "returnType": {
+        "type": "Limit State",
+        "unit": "",
+        "description": "LS_1"
+      },
+      "curveParameters": null
+    },
+    {
+      "description": "legacy - StandardFragilityCurve",
+      "rules": [
+        {
+          "condition": [
+            "surgeLevel - ffe_elev > 0"
+          ],
+          "expression": "scipy.stats.norm.cdf((math.log(surgeLevel - ffe_elev) - 2.021498928)/(0.148406162))"
+        }
+      ],
+      "returnType": {
+        "type": "Limit State",
+        "unit": "",
+        "description": "LS_2"
+      },
+      "curveParameters": null
+    }
+  ]
+}

@@ -16,7 +16,7 @@ DATA_DIR = Path("/data")  # mounted volume in docker-compose; adjust via env lat
 
 
 # Make the route async and use get_async_session
-@router.post("/", response_model=Hazard)
+@router.post("", response_model=Hazard)
 async def create_hazard(
     name: str = Form(...),
     wse_raster: UploadFile = File(...),
@@ -34,7 +34,7 @@ async def create_hazard(
     )
 
 
-@router.get("/", response_model=List[Hazard])
+@router.get("", response_model=List[Hazard])
 async def list_hazards(*, db: AsyncSession = Depends(get_async_session)):
     result = await db.execute(select(Hazard))
     hazards = result.scalars().all()

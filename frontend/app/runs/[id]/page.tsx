@@ -13,6 +13,7 @@ import { useMap } from 'react-leaflet';
 import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
 import iconUrl from 'leaflet/dist/images/marker-icon.png';
 import shadowUrl from 'leaflet/dist/images/marker-shadow.png';
+import { DollarSign, TrendingUp, Building } from 'lucide-react';
 
 // Assuming GeoJSON types (you might want a more specific type)
 type GeoJsonObject = any;
@@ -27,11 +28,32 @@ type RunDetail = {
   hazard_id: number;
   mapping_set_id: number;
   building_dataset_id: number;
+  run_group_id?: number;
   result_path: string | null;
+  interventions?: RunIntervention[];
   // Add nested object types if API returns them, e.g.:
   // hazard: { id: number; name: string };
   // mapping_set: { id: number; name: string };
   // building_dataset: { id: number; name: string };
+};
+
+type RunIntervention = {
+  id: number;
+  building_id: string;
+  intervention_id: number;
+  parameters: { elevation_ft?: number };
+  cost?: number;
+  intervention?: {
+    id: number;
+    name: string;
+    type: string;
+  };
+};
+
+type EALResponse = {
+  total_eal: number;
+  building_count: number;
+  building_eals?: Record<string, number>;
 };
 
 // Dynamically import the Map component
@@ -147,6 +169,11 @@ export default function RunDetailPage() {
     (url: string) => api.get(url).then((r) => r.data)
   );
 
+  const { data: ealData, isLoading: isLoadingEAL } = useSWR<EALResponse>(
+    run?.status === 'COMPLETED' ? `financial/runs/${runId}/eal` : null,
+    (url: string) => api.get(url).then((r) => r.data)
+  );
+
   const getStatusVariant = (status: string): 'default' | 'destructive' | 'secondary' | 'outline' => {
     switch (status?.toUpperCase()) {
       case 'COMPLETED': return 'default';
@@ -204,6 +231,8 @@ export default function RunDetailPage() {
     }
   };
 
+  const totalInterventionCost = run.interventions?.reduce((sum, i) => sum + (i.cost || 0), 0) || 0;
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-start">
@@ -238,6 +267,14 @@ export default function RunDetailPage() {
               <span>{new Date(run.finished_at).toLocaleString()}</span>
             </div>
           )}
+          {run.run_group_id && (
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">Run Group:</span>
+              <Link href={`/run-groups/${run.run_group_id}`} className="text-blue-600 hover:underline">
+                View Group
+              </Link>
+            </div>
+          )}
           <hr />
           <h3 className="font-medium pt-2">Inputs</h3>
           <div className="flex justify-between items-center">
@@ -260,6 +297,96 @@ export default function RunDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Interventions Section */}
+      {run.interventions && run.interventions.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Applied Interventions</CardTitle>
+            <CardDescription>Building-level interventions applied in this run.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {run.interventions.map((intervention) => (
+                <div key={intervention.id} className="border rounded-lg p-3 bg-muted/20">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start space-x-3">
+                      <Building className="w-5 h-5 text-blue-600 mt-0.5" />
+                      <div>
+                        <p className="font-medium">Building {intervention.building_id}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {intervention.intervention?.name || 'Intervention'} - 
+                          {intervention.parameters.elevation_ft ? ` ${intervention.parameters.elevation_ft} ft elevation` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    {intervention.cost && (
+                      <div className="text-right">
+                        <p className="font-medium">${intervention.cost.toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">Cost</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div className="border-t pt-3 flex justify-between items-center">
+                <span className="font-medium">Total Intervention Cost:</span>
+                <span className="font-bold text-lg">${totalInterventionCost.toLocaleString()}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Financial Analysis Section */}
+      {run.status === 'COMPLETED' && ealData && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Financial Analysis</CardTitle>
+            <CardDescription>Expected Annual Loss (EAL) calculations for this run.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="flex items-start space-x-3">
+                <DollarSign className="w-5 h-5 text-red-600 mt-0.5" />
+                <div>
+                  <p className="text-2xl font-bold">${ealData.total_eal.toLocaleString()}</p>
+                  <p className="text-sm text-muted-foreground">Total EAL</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start space-x-3">
+                <Building className="w-5 h-5 text-blue-600 mt-0.5" />
+                <div>
+                  <p className="text-2xl font-bold">{ealData.building_count}</p>
+                  <p className="text-sm text-muted-foreground">Buildings Analyzed</p>
+                </div>
+              </div>
+
+              <div className="flex items-start space-x-3">
+                <TrendingUp className="w-5 h-5 text-green-600 mt-0.5" />
+                <div>
+                  <p className="text-2xl font-bold">
+                    ${Math.round(ealData.total_eal / ealData.building_count).toLocaleString()}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Average per Building</p>
+                </div>
+              </div>
+            </div>
+
+            {run.run_group_id && (
+              <div className="mt-4 pt-4 border-t">
+                <Link 
+                  href={`/run-groups/${run.run_group_id}`} 
+                  className="text-blue-600 hover:underline text-sm"
+                >
+                  Compare with other runs in group →
+                </Link>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Results Map Section */}
       {run.status === 'COMPLETED' && (

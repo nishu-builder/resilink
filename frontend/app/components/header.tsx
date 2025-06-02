@@ -12,6 +12,7 @@ export function Header() {
     { href: '/datasets/fragilities', label: 'Fragility Datasets' },
     { href: '/datasets/mappings', label: 'Mapping Datasets' },
     { href: '/runs', label: 'Runs' },
+    { href: '/run-groups', label: 'Run Groups' },
   ];
 
   return (
