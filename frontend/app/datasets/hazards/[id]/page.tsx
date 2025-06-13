@@ -476,7 +476,7 @@ export default function HazardDetailPage() {
                           
                           if (response.ok) {
                             const result = await response.json();
-                            alert(`Hydraulic modeling started! ${result.message}\n\nThis will take 1-2 minutes. Refresh the page to see results.`);
+                            alert(`${result.message}\n\nThis will take 1-2 minutes. Refresh the page to see results.`);
                             
                             // Optionally reload the page after a delay to show updated results
                             setTimeout(() => {
