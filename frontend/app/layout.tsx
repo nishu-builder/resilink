@@ -6,8 +6,8 @@ import { Header } from '@/app/components/header';
 import "leaflet/dist/leaflet.css";
 
 export const metadata: Metadata = {
-  title: 'Hazard Explore',
-  description: 'Flood hazard damage explorer',
+  title: 'Resilink',
+  description: 'Flood resilience analysis and damage assessment platform',
 };
 
 const inter = Inter({ subsets: ['latin'] });
