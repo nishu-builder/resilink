@@ -28,6 +28,9 @@ dependencies = [
     "scipy>=1.15.2",
     "alembic>=1.13.0",
     "greenlet>=3.2.1",
+    "pillow>=11.2.1",
+    "matplotlib>=3.10.3",
+    "rio-tiler>=7.8.0",
 ]
 
 [project.optional-dependencies]

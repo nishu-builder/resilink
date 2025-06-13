@@ -18,6 +18,7 @@ class Hazard(Base, table=True):
     wse_raster_path: str  # stored path on disk
 
     runs: list["Run"] = Relationship(back_populates="hazard")
+    hazard_interventions: list["HazardIntervention"] = Relationship(back_populates="hazard")
 
 
 class FragilityCurve(Base, table=True):
@@ -81,6 +82,39 @@ class RunIntervention(Base, table=True):
     intervention: Optional[Intervention] = Relationship(back_populates="run_interventions")
 
 
+class HazardIntervention(Base, table=True):
+    __tablename__ = "hazard_interventions"
+    
+    name: str = Field(index=True)
+    type: str  # "dam", "levee"
+    geometry: dict = Field(sa_column=Column(JSON))  # GeoJSON
+    parameters: dict = Field(sa_column=Column(JSON))
+    # Dam parameters: height, width, spillway_elevation, crest_elevation
+    # Levee parameters: height, top_width, side_slopes, alignment
+    
+    hazard_id: int = Field(foreign_key="hazards.id")
+    hazard: Optional["Hazard"] = Relationship(back_populates="hazard_interventions")
+    
+    modified_hazards: list["ModifiedHazard"] = Relationship(back_populates="intervention")
+
+
+class ModifiedHazard(Base, table=True):
+    __tablename__ = "modified_hazards"
+    
+    name: str
+    original_hazard_id: int = Field(foreign_key="hazards.id")
+    intervention_id: int = Field(foreign_key="hazard_interventions.id")
+    wse_raster_path: str
+    model_type: str = "anuga"  # "anuga", "landlab", "hecras"
+    model_output_path: Optional[str] = None
+    
+    original_hazard: Optional["Hazard"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[ModifiedHazard.original_hazard_id]"}
+    )
+    intervention: Optional[HazardIntervention] = Relationship(back_populates="modified_hazards")
+    runs: list["Run"] = Relationship(back_populates="modified_hazard")
+
+
 class RunGroup(Base, table=True):
     __tablename__ = "run_groups"
     
@@ -99,6 +133,9 @@ class Run(Base, table=True):
     mapping_set_id: int = Field(foreign_key="mapping_sets.id")
     building_dataset_id: int = Field(foreign_key="building_datasets.id")
     run_group_id: Optional[int] = Field(default=None, foreign_key="run_groups.id")
+    
+    # Support for modified hazards from interventions
+    modified_hazard_id: Optional[int] = Field(default=None, foreign_key="modified_hazards.id")
 
     status: str = Field(default="PENDING")  # Could be Enum later
     result_path: Optional[str] = None
@@ -114,3 +151,4 @@ class Run(Base, table=True):
     building_dataset: Optional[BuildingDataset] = Relationship(back_populates="runs")
     interventions: list[RunIntervention] = Relationship(back_populates="run")
     run_group: Optional[RunGroup] = Relationship(back_populates="runs")
+    modified_hazard: Optional[ModifiedHazard] = Relationship(back_populates="runs")
