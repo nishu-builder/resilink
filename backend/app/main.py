@@ -7,7 +7,7 @@ settings = get_settings()
 
 from app.db import get_engine
 
-from app.api import hazards, fragilities, mappings, building_datasets, runs, financial, interventions, hazard_interventions
+from app.api import hazards, fragilities, mappings, building_datasets, runs, financial, interventions, hazard_interventions, modified_hazards
 
 app = FastAPI(title=settings.app_name, debug=settings.LOG_LEVEL == 'DEBUG')
 
@@ -30,5 +30,5 @@ def on_startup() -> None:  # pragma: no cover
 async def ping() -> dict[str, str]:
     return {"status": "ok"}
 
-for r in (hazards, fragilities, mappings, building_datasets, runs, financial, interventions, hazard_interventions):
+for r in (hazards, fragilities, mappings, building_datasets, runs, financial, interventions, hazard_interventions, modified_hazards):
     app.include_router(r.router)

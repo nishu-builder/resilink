@@ -1,6 +1,4 @@
-from pathlib import Path
 from typing import List, Optional
-import json
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlmodel import select
@@ -167,29 +165,74 @@ async def process_intervention_with_hydraulic_model(
     model_type: str,
     db: AsyncSession
 ):
-    """Process intervention using ANUGA or Landlab."""
-    # This is a placeholder - actual implementation would:
-    # 1. Load the original hazard raster
-    # 2. Set up ANUGA or Landlab model
-    # 3. Add intervention geometry (dam/levee)
-    # 4. Run hydraulic simulation
-    # 5. Export modified WSE raster
-    # 6. Save to ModifiedHazard table
+    """Process intervention using hydraulic modeling."""
+    from app.services.hydraulic_modeling import process_intervention_modeling
+    import asyncio
+    import logging
+    from pathlib import Path
     
-    # For now, we'll create a stub modified hazard
-    intervention = await db.get(HazardIntervention, intervention_id, {"hazard"})
+    logger = logging.getLogger(__name__)
     
-    modified_hazard = ModifiedHazard(
-        name=f"{intervention.name} - Modified Hazard",
-        original_hazard_id=intervention.hazard_id,
-        intervention_id=intervention_id,
-        wse_raster_path=intervention.hazard.wse_raster_path,  # Placeholder - would be new raster
-        model_type=model_type,
-        model_output_path=f"/data/models/{model_type}_{intervention_id}"
-    )
-    
-    db.add(modified_hazard)
-    await db.commit()
+    try:
+        # Get intervention
+        intervention = await db.get(HazardIntervention, intervention_id)
+        
+        if not intervention:
+            logger.error(f"Intervention {intervention_id} not found")
+            return
+            
+        # Get related hazard
+        hazard = await db.get(Hazard, intervention.hazard_id)
+        
+        if not hazard:
+            logger.error(f"Hazard {intervention.hazard_id} not found")
+            return
+        
+        logger.info(f"Processing intervention {intervention_id}: {intervention.name}")
+        
+        # Prepare file paths
+        original_raster = hazard.wse_raster_path
+        output_dir = Path(f"/data/models/{model_type}_{intervention_id}")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_raster = str(output_dir / "modified_wse.tif")
+        
+        # Run hydraulic modeling in thread pool (CPU-intensive)
+        loop = asyncio.get_event_loop()
+        modeling_results = await loop.run_in_executor(
+            None,
+            process_intervention_modeling,
+            intervention_id,
+            original_raster,
+            intervention.geometry,
+            intervention.type,
+            intervention.parameters,
+            output_raster
+        )
+        
+        if modeling_results['success']:
+            # Create ModifiedHazard record
+            modified_hazard = ModifiedHazard(
+                name=f"{intervention.name} - Modified Hazard",
+                original_hazard_id=intervention.hazard_id,
+                intervention_id=intervention_id,
+                wse_raster_path=output_raster,
+                model_type=model_type,
+                model_output_path=str(output_dir),
+                model_results=modeling_results  # Store modeling statistics
+            )
+            
+            db.add(modified_hazard)
+            await db.commit()
+            await db.refresh(modified_hazard)
+            
+            logger.info(f"Successfully created modified hazard {modified_hazard.id}")
+            
+        else:
+            logger.error(f"Hydraulic modeling failed: {modeling_results.get('error')}")
+            
+    except Exception as e:
+        logger.error(f"Error in hydraulic modeling process: {e}")
+        await db.rollback()
 
 
 @router.get("/{intervention_id}/modified-hazards")
@@ -210,7 +253,9 @@ async def get_modified_hazards(
             "name": mh.name,
             "model_type": mh.model_type,
             "created_at": mh.created_at.isoformat(),
-            "wse_raster_path": mh.wse_raster_path
+            "wse_raster_path": mh.wse_raster_path,
+            "model_results": mh.model_results,
+            "status": mh.model_results.get("success", False) if mh.model_results else False
         }
         for mh in modified_hazards
     ]

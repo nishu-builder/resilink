@@ -105,8 +105,9 @@ class ModifiedHazard(Base, table=True):
     original_hazard_id: int = Field(foreign_key="hazards.id")
     intervention_id: int = Field(foreign_key="hazard_interventions.id")
     wse_raster_path: str
-    model_type: str = "anuga"  # "anuga", "landlab", "hecras"
+    model_type: str = "simplified_flood_model"  # "simplified_flood_model", "anuga", "landlab", "hecras"
     model_output_path: Optional[str] = None
+    model_results: Optional[dict] = Field(default=None, sa_column=Column(JSON))  # Store modeling statistics
     
     original_hazard: Optional["Hazard"] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[ModifiedHazard.original_hazard_id]"}
@@ -129,7 +130,7 @@ class Run(Base, table=True):
 
     name: str = Field(index=True)
 
-    hazard_id: int = Field(foreign_key="hazards.id")
+    hazard_id: Optional[int] = Field(default=None, foreign_key="hazards.id")
     mapping_set_id: int = Field(foreign_key="mapping_sets.id")
     building_dataset_id: int = Field(foreign_key="building_datasets.id")
     run_group_id: Optional[int] = Field(default=None, foreign_key="run_groups.id")

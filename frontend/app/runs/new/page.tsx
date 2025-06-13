@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { PlusCircle, XCircle } from 'lucide-react';
 
 type Hazard = { id: number; name: string };
+type ModifiedHazard = { id: number; name: string; intervention_name: string; intervention_type: string };
 type MappingSet = { id: number; name: string };
 type BuildingDataset = { id: number; name: string };
 type RunGroup = { id: number; name: string };
@@ -35,7 +36,9 @@ type InterventionInput = {
 export default function NewRunPage() {
   const router = useRouter();
   const [name, setName] = useState('');
+  const [hazardType, setHazardType] = useState<'original' | 'modified'>('original');
   const [hazardId, setHazardId] = useState<string>('');
+  const [modifiedHazardId, setModifiedHazardId] = useState<string>('');
   const [mappingSetId, setMappingSetId] = useState<string>('');
   const [buildingDatasetId, setBuildingDatasetId] = useState<string>('');
   const [runGroupId, setRunGroupId] = useState<string>('');
@@ -48,6 +51,49 @@ export default function NewRunPage() {
   const { data: buildingDatasets, isLoading: isLoadingBuildings } = useSWR<BuildingDataset[]>('datasets/buildings', (url: string) => api.get(url).then((r) => r.data));
   const { data: runGroups, isLoading: isLoadingGroups } = useSWR<RunGroup[]>('runs/groups', (url: string) => api.get(url).then((r) => r.data));
   const { data: interventionTypes, isLoading: isLoadingInterventions } = useSWR<Intervention[]>('interventions', (url: string) => api.get(url).then((r) => r.data));
+  
+  // Fetch all modified hazards
+  const { data: allModifiedHazards, isLoading: isLoadingModifiedHazards } = useSWR<ModifiedHazard[]>(
+    'modified-hazards/all',
+    async () => {
+      try {
+        // Get all hazards first
+        const hazardsResponse = await api.get('datasets/hazards');
+        const hazards = hazardsResponse.data;
+        
+        // Get all interventions for each hazard
+        const allModified: ModifiedHazard[] = [];
+        for (const hazard of hazards) {
+          try {
+            const interventionsResponse = await api.get(`hazard-interventions?hazard_id=${hazard.id}`);
+            const interventions = interventionsResponse.data;
+            
+            for (const intervention of interventions) {
+              try {
+                const modifiedResponse = await api.get(`hazard-interventions/${intervention.id}/modified-hazards`);
+                const modifiedHazards = modifiedResponse.data;
+                
+                allModified.push(...modifiedHazards.map((mh: any) => ({
+                  ...mh,
+                  intervention_name: intervention.name,
+                  intervention_type: intervention.type
+                })));
+              } catch (error) {
+                console.error(`Error fetching modified hazards for intervention ${intervention.id}:`, error);
+              }
+            }
+          } catch (error) {
+            console.error(`Error fetching interventions for hazard ${hazard.id}:`, error);
+          }
+        }
+        
+        return allModified; // Return all modified hazards
+      } catch (error) {
+        console.error('Error fetching modified hazards:', error);
+        return [];
+      }
+    }
+  );
   
   // Fetch buildings for the selected building dataset
   const { data: buildings } = useSWR<Building[]>(
@@ -92,7 +138,9 @@ export default function NewRunPage() {
     setError(null);
     setIsLoading(true);
 
-    if (!name || !hazardId || !mappingSetId || !buildingDatasetId) {
+    // Validate required fields based on hazard type
+    const selectedHazardId = hazardType === 'original' ? hazardId : modifiedHazardId;
+    if (!name || !selectedHazardId || !mappingSetId || !buildingDatasetId) {
       setError('All fields are required.');
       setIsLoading(false);
       return;
@@ -101,10 +149,16 @@ export default function NewRunPage() {
     try {
       const payload: any = {
         name,
-        hazard_id: parseInt(hazardId, 10),
         mapping_set_id: parseInt(mappingSetId, 10),
         building_dataset_id: parseInt(buildingDatasetId, 10),
       };
+
+      // Set either hazard_id or modified_hazard_id based on selection
+      if (hazardType === 'original') {
+        payload.hazard_id = parseInt(hazardId, 10);
+      } else {
+        payload.modified_hazard_id = parseInt(modifiedHazardId, 10);
+      }
 
       if (runGroupId) {
         payload.run_group_id = parseInt(runGroupId, 10);
@@ -131,7 +185,7 @@ export default function NewRunPage() {
     }
   };
 
-  const isFetchingData = isLoadingHazards || isLoadingMappings || isLoadingBuildings || isLoadingGroups || isLoadingInterventions;
+  const isFetchingData = isLoadingHazards || isLoadingMappings || isLoadingBuildings || isLoadingGroups || isLoadingInterventions || isLoadingModifiedHazards;
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -171,21 +225,56 @@ export default function NewRunPage() {
             </div>
           </div>
 
+          {/* Hazard Type Selection */}
+          <div>
+            <Label htmlFor="hazard-type">Hazard Type</Label>
+            <Select value={hazardType} onValueChange={(value: 'original' | 'modified') => {
+              setHazardType(value);
+              setHazardId('');
+              setModifiedHazardId('');
+            }}>
+              <SelectTrigger id="hazard-type" className="mt-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="original">Original Hazard</SelectItem>
+                <SelectItem value="modified">Modified Hazard (With Interventions)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <Label htmlFor="hazard-select">Hazard Dataset</Label>
-              <Select value={hazardId} onValueChange={setHazardId} required>
-                <SelectTrigger id="hazard-select" className="mt-1">
-                  <SelectValue placeholder="Select a hazard dataset" />
-                </SelectTrigger>
-                <SelectContent>
-                  {hazards?.map((hazard) => (
-                    <SelectItem key={hazard.id} value={String(hazard.id)}>
-                      {hazard.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="hazard-select">
+                {hazardType === 'original' ? 'Original Hazard Dataset' : 'Modified Hazard Dataset'}
+              </Label>
+              {hazardType === 'original' ? (
+                <Select value={hazardId} onValueChange={setHazardId} required>
+                  <SelectTrigger id="hazard-select" className="mt-1">
+                    <SelectValue placeholder="Select a hazard dataset" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {hazards?.map((hazard) => (
+                      <SelectItem key={hazard.id} value={String(hazard.id)}>
+                        {hazard.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Select value={modifiedHazardId} onValueChange={setModifiedHazardId} required>
+                  <SelectTrigger id="hazard-select" className="mt-1">
+                    <SelectValue placeholder="Select a modified hazard" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allModifiedHazards?.map((modifiedHazard) => (
+                      <SelectItem key={modifiedHazard.id} value={String(modifiedHazard.id)}>
+                        {modifiedHazard.name} ({modifiedHazard.intervention_name} - {modifiedHazard.intervention_type})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             <div>

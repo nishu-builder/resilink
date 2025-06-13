@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 import io
 import json
+import logging
 
 from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException, Query
 from fastapi.responses import Response, JSONResponse
@@ -24,6 +25,7 @@ router = APIRouter(prefix="/datasets/hazards", tags=["Hazards"], redirect_slashe
 
 DATA_DIR = Path("/data")  # mounted volume in docker-compose; adjust via env later
 
+logger = logging.getLogger(__name__)
 
 # Make the route async and use get_async_session
 @router.post("", response_model=Hazard)
@@ -170,8 +172,11 @@ async def get_hazard_tile(
             
             # Apply colormap to single band data
             stats = src.statistics()
-            vmin = stats[1]['min']
-            vmax = stats[1]['max']
+            # rio-tiler returns stats as {band_name: {min, max, ...}}
+            # For single band rasters, usually band name is '1' (string) or 'b1'
+            band_stats = stats.get('1') or stats.get('b1') or list(stats.values())[0]
+            vmin = band_stats.min
+            vmax = band_stats.max
             
             # Create a colormap
             cmap = cm.get_cmap(colormap)
@@ -204,14 +209,19 @@ async def get_hazard_tile(
                 }
             )
     except Exception as e:
+        logger.error(f"Error generating tile: {str(e)}", exc_info=True)
         # Return transparent tile for out of bounds
-        if "TileOutsideBounds" in str(e):
+        if "outside bounds" in str(e) or "TileOutsideBounds" in str(e) or "NoOverviewWarning" in str(e):
             transparent = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
             img_bytes = io.BytesIO()
             transparent.save(img_bytes, format='PNG')
             img_bytes.seek(0)
             return Response(
                 content=img_bytes.getvalue(),
-                media_type="image/png"
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "max-age=86400",
+                    "Access-Control-Allow-Origin": "*"
+                }
             )
         raise HTTPException(500, f"Error generating tile: {str(e)}")

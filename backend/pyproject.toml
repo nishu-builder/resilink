@@ -31,6 +31,8 @@ dependencies = [
     "pillow>=11.2.1",
     "matplotlib>=3.10.3",
     "rio-tiler>=7.8.0",
+    "netcdf4>=1.6.0",
+    "scikit-image>=0.22.0",
 ]
 
 [project.optional-dependencies]

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 
-from app.models import Run, Hazard, MappingSet, BuildingDataset, RunIntervention, RunGroup
+from app.models import Run, Hazard, MappingSet, BuildingDataset, RunIntervention, RunGroup, ModifiedHazard
 from app.services.analysis import perform_analysis
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,8 @@ class RunInterventionCreate(BaseModel):
 
 class CreateRunRequest(BaseModel):
     name: str
-    hazard_id: int
+    hazard_id: Optional[int] = None  # Original hazard
+    modified_hazard_id: Optional[int] = None  # Modified hazard (from intervention)
     mapping_set_id: int
     building_dataset_id: int
     run_group_id: Optional[int] = None
@@ -85,7 +86,31 @@ async def create_run(
     session: AsyncSession = Depends(get_async_session),
 ):
     logger.info('Creating new run')
-    hazard = await session.get(Hazard, request.hazard_id)
+    
+    # Validate that either hazard_id or modified_hazard_id is provided, but not both
+    if not request.hazard_id and not request.modified_hazard_id:
+        raise HTTPException(status_code=400, detail="Either hazard_id or modified_hazard_id must be provided")
+    
+    if request.hazard_id and request.modified_hazard_id:
+        raise HTTPException(status_code=400, detail="Cannot specify both hazard_id and modified_hazard_id")
+    
+    # Validate the hazard (original or modified)
+    hazard = None
+    modified_hazard = None
+    
+    if request.hazard_id:
+        hazard = await session.get(Hazard, request.hazard_id)
+        if not hazard:
+            raise HTTPException(status_code=400, detail="Invalid hazard_id")
+    
+    if request.modified_hazard_id:
+        modified_hazard = await session.get(ModifiedHazard, request.modified_hazard_id)
+        if not modified_hazard:
+            raise HTTPException(status_code=400, detail="Invalid modified_hazard_id")
+        # Get the original hazard for analysis pipeline
+        hazard = await session.get(Hazard, modified_hazard.original_hazard_id)
+    
+    # Validate other required resources
     mapping_set = await session.get(MappingSet, request.mapping_set_id)
     building_dataset = await session.get(BuildingDataset, request.building_dataset_id)
 
@@ -99,7 +124,8 @@ async def create_run(
 
     run = Run(
         name=request.name,
-        hazard_id=hazard.id,
+        hazard_id=request.hazard_id,  # Can be None if using modified hazard
+        modified_hazard_id=request.modified_hazard_id,  # Can be None if using original hazard
         mapping_set_id=mapping_set.id,
         building_dataset_id=building_dataset.id,
         run_group_id=request.run_group_id,

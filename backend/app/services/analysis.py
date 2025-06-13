@@ -19,7 +19,7 @@ from scipy.stats import norm
 import logging
 import pandas as pd
 
-from app.models import Run, FragilityCurve, MappingSet, Hazard, BuildingDataset, RunIntervention, Building
+from app.models import Run, FragilityCurve, MappingSet, Hazard, BuildingDataset, RunIntervention, Building, ModifiedHazard
 from app.services.financial import calculate_eal
 
 # Constants
@@ -159,11 +159,31 @@ async def perform_analysis(run_id: int, M_OFFSET: float = 0.0) -> None:
 
         # Fetch related objects using await
         logger.info(f"Fetching related objects for run {run_id}")
-        hazard: Hazard | None = await session.get(Hazard, run.hazard_id)
+        
+        # Determine which hazard to use (original or modified)
+        hazard_raster_path = None
+        if run.modified_hazard_id:
+            # Use modified hazard
+            modified_hazard: ModifiedHazard | None = await session.get(ModifiedHazard, run.modified_hazard_id)
+            if modified_hazard:
+                hazard_raster_path = modified_hazard.wse_raster_path
+                # Get original hazard for metadata
+                hazard: Hazard | None = await session.get(Hazard, modified_hazard.original_hazard_id)
+                logger.info(f"Using modified hazard {run.modified_hazard_id} with raster: {hazard_raster_path}")
+            else:
+                raise ValueError(f"Modified hazard {run.modified_hazard_id} not found")
+        else:
+            # Use original hazard
+            hazard: Hazard | None = await session.get(Hazard, run.hazard_id)
+            if hazard:
+                hazard_raster_path = hazard.wse_raster_path
+                logger.info(f"Using original hazard {run.hazard_id} with raster: {hazard_raster_path}")
+        
         mapping_set: MappingSet | None = await session.get(MappingSet, run.mapping_set_id)
         building_ds: BuildingDataset | None = await session.get(BuildingDataset, run.building_dataset_id)
-        if not all([hazard, mapping_set, building_ds]):
-            raise ValueError("Run has invalid foreign keys")
+        
+        if not all([hazard, mapping_set, building_ds, hazard_raster_path]):
+            raise ValueError("Run has invalid foreign keys or missing hazard raster")
 
         # NEW: Fetch interventions for this run
         logger.info(f"Fetching interventions for run {run_id}")
@@ -228,8 +248,8 @@ async def perform_analysis(run_id: int, M_OFFSET: float = 0.0) -> None:
                 raise ValueError(f"Missing fragility curve(s) in DB: {missing_ids}")
 
             # Load WSE raster (sync)
-            logger.info(f"Loading WSE raster from {hazard.wse_raster_path}")
-            wse_ds = rasterio.open(hazard.wse_raster_path)
+            logger.info(f"Loading WSE raster from {hazard_raster_path}")
+            wse_ds = rasterio.open(hazard_raster_path)
             logger.info(f"WSE raster loaded: {wse_ds.width}x{wse_ds.height}")
 
             # Extract buildings from zip (sync)
