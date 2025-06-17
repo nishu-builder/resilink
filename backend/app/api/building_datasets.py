@@ -194,3 +194,46 @@ async def bulk_update_asset_values(
     await db.commit()
     
     return {"updated": updated_count, "total_requested": len(updates)}
+
+
+@router.get("/{dataset_id}/geojson")
+async def get_buildings_geojson(
+    dataset_id: int,
+    *,
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Get all buildings in a dataset as GeoJSON FeatureCollection."""
+    # Verify dataset exists
+    result = await db.execute(
+        select(BuildingDataset).where(BuildingDataset.id == dataset_id)
+    )
+    dataset = result.scalar_one_or_none()
+    
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Building dataset not found")
+    
+    # Get all buildings
+    result = await db.execute(
+        select(Building).where(Building.dataset_id == dataset_id)
+    )
+    buildings = result.scalars().all()
+    
+    # Convert to GeoJSON FeatureCollection
+    features = []
+    for building in buildings:
+        if building.geometry:
+            feature = {
+                "type": "Feature",
+                "geometry": building.geometry,
+                "properties": {
+                    "guid": building.guid,
+                    "asset_value": building.asset_value,
+                    **building.properties
+                }
+            }
+            features.append(feature)
+    
+    return {
+        "type": "FeatureCollection",
+        "features": features
+    }

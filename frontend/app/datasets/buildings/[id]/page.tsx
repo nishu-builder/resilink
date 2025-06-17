@@ -5,6 +5,13 @@ import useSWR from 'swr';
 import api from '@/app/hooks/useApi';
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
+
+// Dynamically import the map component to avoid SSR issues
+const BuildingsMapViewer = dynamic(() => import('@/app/components/BuildingsMapViewer'), {
+  ssr: false,
+  loading: () => <div className="h-96 bg-gray-100 animate-pulse rounded-lg" />
+});
 
 type Building = {
   id: number;
@@ -164,6 +171,12 @@ export default function BuildingDatasetDetailPage() {
             {dataset.feature_count} buildings • ID: {dataset.id}
           </p>
         </div>
+      </div>
+
+      {/* Map View */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+        <h3 className="text-lg font-semibold mb-3">Building Locations</h3>
+        <BuildingsMapViewer datasetId={Number(id)} className="h-96 rounded-lg overflow-hidden" />
       </div>
       
       <div className="overflow-x-auto">

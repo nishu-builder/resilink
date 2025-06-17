@@ -369,6 +369,20 @@ def process_intervention_modeling(
     try:
         logger.info(f"Starting hydraulic modeling for intervention {intervention_id}")
         
+        # Use improved modeling for levees
+        if intervention_type == 'levee':
+            try:
+                from app.services.improved_hydraulic_modeling import process_improved_levee_modeling
+                return process_improved_levee_modeling(
+                    intervention_id,
+                    original_raster_path,
+                    intervention_geometry,
+                    intervention_parameters,
+                    output_raster_path
+                )
+            except ImportError:
+                logger.warning("Improved modeling not available, falling back to simplified model")
+        
         # Initialize modeler
         modeler = SimplifiedFloodModeler(original_raster_path)
         

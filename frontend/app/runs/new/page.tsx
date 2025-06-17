@@ -9,6 +9,13 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { PlusCircle, XCircle } from 'lucide-react';
+import dynamic from 'next/dynamic';
+
+// Dynamically import the map component to avoid SSR issues
+const HazardBuildingOverlay = dynamic(() => import('@/app/components/HazardBuildingOverlay'), {
+  ssr: false,
+  loading: () => <div className="h-96 bg-gray-100 animate-pulse rounded-lg" />
+});
 
 type Hazard = { id: number; name: string };
 type ModifiedHazard = { id: number; name: string; intervention_name: string; intervention_type: string };
@@ -309,6 +316,19 @@ export default function NewRunPage() {
               </Select>
             </div>
           </div>
+
+          {/* Map Preview */}
+          {(hazardId || modifiedHazardId || buildingDatasetId) && (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+              <h3 className="text-lg font-semibold mb-3">Preview</h3>
+              <HazardBuildingOverlay 
+                hazardId={hazardId ? parseInt(hazardId) : undefined}
+                modifiedHazardId={modifiedHazardId ? parseInt(modifiedHazardId) : undefined}
+                buildingDatasetId={buildingDatasetId ? parseInt(buildingDatasetId) : undefined}
+                className="h-96 rounded-lg overflow-hidden"
+              />
+            </div>
+          )}
 
           <div className="space-y-4">
             <div className="flex justify-between items-center">
