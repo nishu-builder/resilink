@@ -3,6 +3,9 @@
 ## Quick Start
 
 ```bash
+# Install task if you do not have it
+brew install go-task
+
 # Start all services
 task up
 
