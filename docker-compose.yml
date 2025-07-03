@@ -37,11 +37,12 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       target: dev
-    command: yarn dev
+    command: npm run dev
     depends_on:
       - backend
     volumes:
       - ./frontend:/app
+      - /app/node_modules
     env_file:
       - .env.example
       - .env
