@@ -2,6 +2,14 @@
 
 ## Quick Start
 
+Make a `.env` file with these values:
+```bash
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+NEXT_PUBLIC_MAPBOX_TOKEN=
+```
+
+Install:
 ```bash
 # Install task if you do not have it
 brew install go-task
